@@ -25,7 +25,7 @@ The `overwrite-fn` is called when determining how to overwrite existing data upo
 The `check-fn` is called to generate processed information to utilize in the `dispatch-fn`.  On check operations, it is called with one string argument \[^String data\] which is the current value on disk of the provided key if it existed.  If the key is not present in the database, the function is called with no arguments.  The return value of `check-fn` is appended to the entry map (continue reading for more) under an `:r` keyword.  This may be extracted and processed in the body of the `dispatch-fn`.
 
 (this will be changed soon)
-The `dispatch-fn` is called on the merge results of check operations.  Its argument is a map which looks like `{:key :value :aux :c :u :o :r}`.  The relevant keywords for processing are `:value :aux :r`.  This function is meant to be used to process the results.
+The `dispatch-fn` is called on the merge results of check operations.  Its argument is a map which looks like `{:key :value :aux :c :u :o :r}`.  The relevant keywords for processing are `:key :value :aux :r`.  This function is meant to be used to process the results.
 
 Below are example implementations of the above functions.
 
@@ -67,6 +67,8 @@ The insert is handled by an agent so that the thread making the above call will 
 
 (insert-entry entry)
 ```
+
+The code does not yet handle errors or protect you from making tiny or catastrophic mistakes.
 
 ## License
 
