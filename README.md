@@ -1,7 +1,5 @@
 # drum
 
-this readme is out of date, will be updated soon
-
 A Clojure implementation of DRUM (Disk Repository with Update Management).  The specifics of the DRUM design will not be discussed here.  See this group's work for more detail: [IRLbot](http://irl.cs.tamu.edu/crawler/).  Oracle Berkeley DB Java Edition is used for storage of <key,value> pairs.  This will be implemented in a web crawler under development.  **Send bug reports and suggestions to jmurphy@protonmail.com.**
 
 ## Usage

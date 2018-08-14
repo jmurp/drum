@@ -5,6 +5,10 @@
            [drum KeyComparator DrumManager]
            [com.sleepycat.je Cursor DatabaseEntry]))
 
+(defn drum-entry
+  [{:keys [key value aux check update order result]}]
+  (->drumEntry key value aux check update order result))
+
 (defn read-buffer-from-file
   "Reads a buffer back into memory as a sequence."
   [filename]
@@ -21,7 +25,6 @@
       #(.compare key-comp (hash->bytes (:key %1)) (hash->bytes (:key %2)))
       (map #(assoc %1 :order %2) buffer (range n)))))
 
-;todo make sure to change the fxn which combines the results after I optimize the kv and aux file contents
 (defn perform-dispatch
   "Calls the provided dispatch-fn on each map which is a merge of the original
   aux and the merge-results with keys (:key :value :u :c :o :r :aux).
@@ -29,7 +32,7 @@
   [aux-file merge-results dispatch-fn]
   (doall
     (map dispatch-fn
-         (map #(assoc %1 :aux (:aux %2))
+         (map #(assoc %1 :aux %2)
               (sort-by :order merge-results)
               (read-buffer-from-file aux-file)))))
 
@@ -77,7 +80,6 @@
               ^ReentrantLock file-lock (get (:file-locks drum) index)]
           (.lock file-lock)
           (let [merge-results (filter #(boolean %) (perform-merge DM (get-sorted-bucket-buffer kv-file) overwrite-fn check-fn))]
-            (println merge-results)
             (perform-dispatch aux-file merge-results dispatch-fn)
             (set-file-size kv-file 0)
             (set-file-size aux-file 0)
@@ -130,7 +132,7 @@
   "Sets the key and value fields of the buffers of drumEntries to nil
   and removes those that are not check operations."
   [buffer]
-  (into [] (map #(assoc % :key nil :value nil) (filter #(:check %) buffer))))
+  (into [] (map #(:aux %) (filter #(:check %) buffer))))
 
 (defn transfer-overflow
   "Transfers contents of the overflow files into the normal files.
