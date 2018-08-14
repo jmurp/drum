@@ -12,16 +12,16 @@
     (reduce #(concat %1 (read-string %2)) [] (line-seq reader))))
 
 (defn get-sorted-bucket-buffer
-  "Returns the sorted bucket buffer from file appending the original
-  order with a :o keyword in the entries."
+  "Returns the sorted bucket buffer from file."
   [kv-file]
   (let [buffer (read-buffer-from-file kv-file)
         n (count buffer)
         key-comp (KeyComparator.)]
     (sort
       #(.compare key-comp (hash->bytes (:key %1)) (hash->bytes (:key %2)))
-      (map #(assoc %1 :o %2) buffer (range n)))))
+      (map #(assoc %1 :order %2) buffer (range n)))))
 
+;todo make sure to change the fxn which combines the results after I optimize the kv and aux file contents
 (defn perform-dispatch
   "Calls the provided dispatch-fn on each map which is a merge of the original
   aux and the merge-results with keys (:key :value :u :c :o :r :aux).
@@ -29,8 +29,8 @@
   [aux-file merge-results dispatch-fn]
   (doall
     (map dispatch-fn
-         (map merge
-              (sort-by :o merge-results)
+         (map #(assoc %1 :aux (:aux %2))
+              (sort-by :order merge-results)
               (read-buffer-from-file aux-file)))))
 
 (defn single-merge
@@ -40,21 +40,21 @@
   and determines the value of the added :r key associated with the entry.
   If it is not a check, returns nil."
   [^Cursor cursor overwrite-fn check-fn entry]
-  (if (:u entry)
+  (if (:update entry)
     (if-let [data (DrumManager/findOnUpdate (:key entry) cursor)]
       (let [new-data (overwrite-fn data (:value entry))]
-        (.putCurrent cursor (DatabaseEntry. (.getBytes (overwrite-fn (:value entry) data) "UTF-8")))
-        (if (:c entry)
-          (assoc entry :r (check-fn new-data))))
+        (.putCurrent cursor (DatabaseEntry. (.getBytes new-data "UTF-8")))
+        (if (:check entry)
+          (assoc entry :result (check-fn new-data))))
       (do
         (.put cursor
               (DatabaseEntry. (.getBytes (:key entry) "UTF-8"))
               (DatabaseEntry. (.getBytes (:value entry) "UTF-8")))
-        (if (:c entry)
-          (assoc entry :r (check-fn)))))
+        (if (:check entry)
+          (assoc entry :result (check-fn)))))
     (if (DrumManager/findOnCheck (:key entry) cursor)
-      (assoc entry :r (check-fn (DrumManager/getCurrentValue (:key entry) cursor)))
-      (assoc entry :r (check-fn)))))
+      (assoc entry :result (check-fn (DrumManager/getCurrentValue (:key entry) cursor)))
+      (assoc entry :result (check-fn)))))
 
 (defn perform-merge
   "Merges the contents of the bucket buffer with the database."
@@ -77,6 +77,7 @@
               ^ReentrantLock file-lock (get (:file-locks drum) index)]
           (.lock file-lock)
           (let [merge-results (filter #(boolean %) (perform-merge DM (get-sorted-bucket-buffer kv-file) overwrite-fn check-fn))]
+            (println merge-results)
             (perform-dispatch aux-file merge-results dispatch-fn)
             (set-file-size kv-file 0)
             (set-file-size aux-file 0)
@@ -121,14 +122,15 @@
       :max-file-size max-file-size)))
 
 (defn gen-kv-buffer
-  "Takes a buffer of entries (key value aux c u) and returns a buffer of only (key value c u)."
+  "Sets the aux field of the buffer of drumEntries to nil."
   [buffer]
-  (into [] (map #(dissoc % :aux) buffer)))
+  (into [] (map #(assoc % :aux nil) buffer)))
 
 (defn gen-aux-buffer
-  "Takes a buffer of entries (key value aux c u) and returns a buffer of only (aux)."
+  "Sets the key and value fields of the buffers of drumEntries to nil
+  and removes those that are not check operations."
   [buffer]
-  (into [] (filter #(not= % {}) (map #(dissoc % :key :value :c :u) buffer))))
+  (into [] (map #(assoc % :key nil :value nil) (filter #(:check %) buffer))))
 
 (defn transfer-overflow
   "Transfers contents of the overflow files into the normal files.
@@ -166,38 +168,6 @@
     (> (max (file-size kv-file) (file-size aux-file)) max-size)
     (compare-and-set! merging false true)))
 
-(comment
-
-  (defn action-insert-old
-    "Action for the drum buckets on insertion. This function inserts the key
-  into the buffer and writes the buffer to disk if it is full. It checks the file size and
-  sends the appropriate action to the merge agent if it is not already merging."
-    [old-bucket entry file-lock drum]
-    (let [new-buffer (into [] (conj (:buffer old-bucket) entry))]
-      (if-not (> (size-in-bytes new-buffer) (:max-buffer-size drum))
-        (assoc old-bucket :buffer new-buffer)
-        (let [kv-file (:kv-file old-bucket) aux-file (:aux-file old-bucket)]
-          (if (.tryLock file-lock)
-            (if (:overflow old-bucket)
-              (let [[kv-off aux-off] (transfer-overflow kv-file aux-file)]
-                (let [[new-kv-off new-aux-off] (write-buffers kv-file kv-off aux-file aux-off new-buffer)]
-                  (.unlock file-lock)
-                  (merge-if-needed drum new-kv-off new-aux-off)
-                  (assoc old-bucket :buffer [] :overflow false :kv-file-pos new-kv-off :aux-file-pos new-aux-off)))
-              (let [last-kv-off (:kv-file-pos old-bucket) last-aux-off (:aux-file-pos old-bucket)
-                    old-kv-off (if (< last-kv-off (file-size kv-file)) last-kv-off 0)
-                    old-aux-off (if (< last-aux-off (file-size aux-file)) last-aux-off 0)
-                    [new-kv-off new-aux-off] (write-buffers kv-file (:kv-file-pos old-bucket)
-                                                            aux-file (:aux-file-pos old-bucket) new-buffer)]
-                (.unlock file-lock)
-                (merge-if-needed drum new-kv-off new-aux-off)
-                (assoc old-bucket :buffer [] :kv-file-pos new-kv-off :aux-file-pos new-aux-off)))
-            (do
-              (write-buffers-overflow kv-file aux-file new-buffer)
-              (assoc old-bucket :buffer [] :overflow true)))))))
-
-  )
-
 (defn action-insert
   "Action for the drum buckets on insertion. This function inserts the key
   into the buffer and writes the buffer to disk if it is full. It checks the file size and
@@ -229,10 +199,10 @@
     (dec (int (Math/ceil (/ byteval (/ 256 n)))))))
 
 (defn insert
-  "Sends the entry to the correct agent (based on first byte of hash) for insertion into its buffer."
+  "Sends the drum-entry to the correct agent (based on first byte of hash) for insertion into its buffer."
   [drum entry]
   (let [index (hash->drum-index (count (:buckets drum)) (:key entry))]
-    (send-off
+    (send
       (get (:buckets drum) index)
       action-insert
       entry

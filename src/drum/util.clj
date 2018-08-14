@@ -6,6 +6,11 @@
            [javax.xml.bind DatatypeConverter]
            [java.io RandomAccessFile]))
 
+(defrecord drumEntry [key value aux check update order result])
+(defn drum-entry
+  [{:keys [key value aux check update order result]}]
+  (->drumEntry key value aux check update order result))
+
 (defn size-in-bytes
   "Returns the number of bytes used to represent x in memory."
   [x]
