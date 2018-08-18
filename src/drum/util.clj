@@ -1,40 +1,45 @@
 (ns drum.util
-  (:require [clj-memory-meter.core :refer [measure]]
-            [clojure.java.io :as io])
-  (:import [java.security MessageDigest]
-           [java.util Arrays]
-           [javax.xml.bind DatatypeConverter]
-           [java.io RandomAccessFile]))
+  (:require [clj-memory-meter.core :refer [measure]])
+  (:import [javax.xml.bind DatatypeConverter]))
 
-(defrecord drumEntry [key value aux check update order result])
-
-(defn size-in-bytes
-  "Returns the number of bytes used to represent x in memory."
-  [x]
-  (measure x :bytes true))
-
-(def MD (MessageDigest/getInstance "SHA-256"))
-(defn eight-byte-hash
-  "Returns an eight byte hash of the input string in hex-string format."
-  [input]
-  (let [bytes (.digest MD (.getBytes input))
-        shorter-bytes (Arrays/copyOfRange bytes 0 8)]
-    (DatatypeConverter/printHexBinary shorter-bytes)))
-
-(defn hash->bytes
-  "Returns byte array of the hex-string."
-  [hex]
-  (DatatypeConverter/parseHexBinary hex))
 
 (defn file-size
   "Returns the file size in bytes."
   [full-path]
   (.length (clojure.java.io/file full-path)))
 
-(defn set-file-size
-  "Uses RandomAccessFile to set the file size."
-  [filename size]
-  (let [raf (RandomAccessFile. (io/file filename) "rwd")]
-    (.setLength raf size)
-    (.close raf)))
+(defn size-in-bytes
+  "Returns the number of bytes used to represent x in memory."
+  [x]
+  (measure x :bytes true))
 
+
+(defn hash->bytes
+  "Returns byte array of the hex-string."
+  [hex]
+  (DatatypeConverter/parseHexBinary hex))
+
+(defn gen-kv-buffer
+  "Sets the aux field of the buffer of drumEntries to nil."
+  [buffer]
+  (into [] (map #(assoc % :aux nil) buffer)))
+
+(defn gen-aux-buffer
+  "Sets the key and value fields of the buffers of drumEntries to nil
+  and removes those that are not check operations."
+  [buffer]
+  (into [] (map #(:aux %) (filter #(:check %) buffer))))
+
+(defn need-to-merge?
+  "Sends the merge action to the merge agent if either files are full and merge is not taking place."
+  [kv-file aux-file max-size merging]
+  (and
+    (> (max (file-size kv-file) (file-size aux-file)) max-size)
+    (compare-and-set! merging false true)))
+
+(defn hash->drum-index
+  "Return the drum bucket index for the provided hash value based on
+  the first byte value."
+  [n hex]
+  (let [byteval (read-string (str "0x" (.substring hex 0 2)))]
+    (dec (int (Math/ceil (/ byteval (/ 256 n)))))))

@@ -1,29 +1,27 @@
 (ns drum.core
   (:require [drum.util :refer :all]
+            [drum.io :refer :all]
             [clojure.java.io :as io])
   (:import [java.util.concurrent.locks ReentrantLock]
-           [drum KeyComparator DrumManager]
-           [com.sleepycat.je Cursor DatabaseEntry]))
+           [drum DrumManager]
+           [com.sleepycat.je Cursor DatabaseEntry]
+           [java.security MessageDigest]
+           [java.util Arrays]
+           [javax.xml.bind DatatypeConverter]))
+
+(def MD (MessageDigest/getInstance "SHA-256"))
+(defn eight-byte-hash
+  "Returns an eight byte hash of the input string in hex-string format."
+  [input]
+  (let [bytes (.digest MD (.getBytes input))
+        shorter-bytes (Arrays/copyOfRange bytes 0 8)]
+    (DatatypeConverter/printHexBinary shorter-bytes)))
+
+(defrecord drumEntry [key value aux check update order result])
 
 (defn drum-entry
   [{:keys [key value aux check update order result]}]
   (->drumEntry key value aux check update order result))
-
-(defn read-buffer-from-file
-  "Reads a buffer back into memory as a sequence."
-  [filename]
-  (with-open [reader (io/reader filename)]
-    (reduce #(concat %1 (read-string %2)) [] (line-seq reader))))
-
-(defn get-sorted-bucket-buffer
-  "Returns the sorted bucket buffer from file."
-  [kv-file]
-  (let [buffer (read-buffer-from-file kv-file)
-        n (count buffer)
-        key-comp (KeyComparator.)]
-    (sort
-      #(.compare key-comp (hash->bytes (:key %1)) (hash->bytes (:key %2)))
-      (map #(assoc %1 :order %2) buffer (range n)))))
 
 (defn perform-dispatch
   "Calls the provided dispatch-fn on each map which is a merge of the original
@@ -123,53 +121,6 @@
       :max-buffer-size max-buf-size
       :max-file-size max-file-size)))
 
-(defn gen-kv-buffer
-  "Sets the aux field of the buffer of drumEntries to nil."
-  [buffer]
-  (into [] (map #(assoc % :aux nil) buffer)))
-
-(defn gen-aux-buffer
-  "Sets the key and value fields of the buffers of drumEntries to nil
-  and removes those that are not check operations."
-  [buffer]
-  (into [] (map #(:aux %) (filter #(:check %) buffer))))
-
-(defn transfer-overflow
-  "Transfers contents of the overflow files into the normal files.
-  Truncates the overflow files and returns the new offsets for writing."
-  [kv-file aux-file]
-  (let [kv-overflow (read-buffer-from-file (str kv-file "_OF"))
-        aux-overflow (read-buffer-from-file (str aux-file "_OF"))]
-    (spit kv-file (with-out-str (pr kv-overflow)) :append true)
-    (spit kv-file "\n" :append true)
-    (spit aux-file (with-out-str (pr aux-overflow)) :append true)
-    (spit aux-file "\n" :append true)
-    (set-file-size (str kv-file "_OF") 0)
-    (set-file-size (str aux-file "_OF") 0)))
-
-(defn write-buffers
-  "Writes the appropriate buffers to their files."
-  [kv-file aux-file buffer]
-  (spit kv-file (with-out-str (pr (gen-kv-buffer buffer))) :append true)
-  (spit kv-file "\n" :append true)
-  (spit aux-file (with-out-str (pr (gen-aux-buffer buffer))) :append true)
-  (spit aux-file "\n" :append true))
-
-(defn write-buffers-overflow
-  "Writes the buffers to their overflow files, which are not allocated."
-  [kv-file aux-file buffer]
-  (spit (str kv-file "_OF") (with-out-str (pr (gen-kv-buffer buffer))) :append true)
-  (spit (str kv-file "_OF") "\n" :append true)
-  (spit (str aux-file "_OF") (with-out-str (pr (gen-aux-buffer buffer))) :append true)
-  (spit (str aux-file "_OF") "\n" :append true))
-
-(defn need-to-merge?
-  "Sends the merge action to the merge agent if either files are full and merge is not taking place."
-  [kv-file aux-file max-size merging]
-  (and
-    (> (max (file-size kv-file) (file-size aux-file)) max-size)
-    (compare-and-set! merging false true)))
-
 (defn action-insert
   "Action for the drum buckets on insertion. This function inserts the key
   into the buffer and writes the buffer to disk if it is full. It checks the file size and
@@ -192,13 +143,6 @@
           (do
             (write-buffers-overflow kv-file aux-file new-buffer)
             (assoc old-bucket :buffer [] :overflow true)))))))
-
-(defn hash->drum-index
-  "Return the drum bucket index for the provided hash value based on
-  the first byte value."
-  [n hex]
-  (let [byteval (read-string (str "0x" (.substring hex 0 2)))]
-    (dec (int (Math/ceil (/ byteval (/ 256 n)))))))
 
 (defn insert
   "Sends the drum-entry to the correct agent (based on first byte of hash) for insertion into its buffer."
