@@ -1,4 +1,4 @@
-(defproject drum "0.1.2-SNAPSHOT"
+(defproject drum "0.1.3-SNAPSHOT"
   :description "Implementation of DRUM (disk repository with update management,
   see this group's work http://irl.cs.tamu.edu/crawler/) using Berkeley DB."
   :url "https://github.com/jmurp/drum"
