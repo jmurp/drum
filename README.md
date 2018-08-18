@@ -58,7 +58,11 @@ Finally, drum may be used by inserting drumEntry records.  These look like `{:ke
 (insert drum-object check-and-update-entry)
 ```
 
-**Note the use of drum-entry**.  This is an exposed constructor the drumEntry record and will set all non-specified keywords to nil.  
+**Note the use of drum-entry**.  This is an exposed constructor the drumEntry record and will set all non-specified keywords to nil.  Since it is frequent to create a hash for identification when using DRUM, a function is provided which hashes strings into an eight byte hash, returned in hex format.
+```
+(require '[drum.core :refer [eight-byte-hash]])
+(def entry (drum-entry {:key (eight-byte-hash "example_id") :aux "aux-data" :check true)}))
+```
 
 The insert is handled by an agent so that the thread making the above call will never block.  This implementation is thread safe.  I recommend creating a partially called function with the created drum object and never touching it again.
 ```
