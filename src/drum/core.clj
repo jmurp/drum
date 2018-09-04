@@ -1,6 +1,7 @@
 (ns drum.core
   (:require [drum.util :refer :all]
             [drum.io :refer :all]
+            [drum.log :refer :all]
             [clojure.java.io :as io])
   (:import [java.util.concurrent.locks ReentrantLock]
            [drum DrumManager]
@@ -136,12 +137,17 @@
             (when (:overflow old-bucket)
               (transfer-overflow kv-file aux-file))
             (write-buffers kv-file aux-file new-buffer)
-            (when (need-to-merge? kv-file aux-file (:max-file-size drum) (:merging drum))
-              (send-off (:merge-agent drum) (:merge-action drum) drum))
+            (if (need-to-merge? kv-file aux-file (:max-file-size drum) (:merging drum))
+              (do
+                (send-off (:merge-agent drum) (:merge-action drum) drum)
+                (log-insert name true drum))
+              (do
+                (log-insert name false drum)))
             (.unlock file-lock)
             (assoc old-bucket :buffer [] :overflow false))
           (do
             (write-buffers-overflow kv-file aux-file new-buffer)
+            (log-insert (:name drum) drum)
             (assoc old-bucket :buffer [] :overflow true)))))))
 
 (defn insert
