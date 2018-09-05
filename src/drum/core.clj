@@ -72,18 +72,23 @@
   an old agent state and the drum object as its second argument."
   [overwrite-fn check-fn dispatch-fn]
   (fn [_ drum]
+    (log-merge (:name drum))
     (let [DM (DrumManager. (:path drum) (:name drum))]
       (doseq [index (range (count (:buckets drum)))]
+        (log-merge name index)
         (let [kv-file (:kv-file @(get (:buckets drum) index))
               aux-file (:aux-file @(get (:buckets drum) index))
               ^ReentrantLock file-lock (get (:file-locks drum) index)]
           (.lock file-lock)
+          (log-merge name true true)
           (let [merge-results (filter #(boolean %) (perform-merge DM (get-sorted-bucket-buffer kv-file) overwrite-fn check-fn))]
             (perform-dispatch aux-file merge-results dispatch-fn)
             (set-file-size kv-file 0)
             (set-file-size aux-file 0)
-            (.unlock file-lock)))))
-    (swap! (:merging drum) (fn [_] false))))
+            (.unlock file-lock)
+            (log-merge name true false)))))
+    (swap! (:merging drum) (fn [_] false))
+    (log-merge name true true true)))
 
 (defn create-drum-bucket
   "Creates a single drum bucket as an agent."
@@ -140,9 +145,9 @@
             (if (need-to-merge? kv-file aux-file (:max-file-size drum) (:merging drum))
               (do
                 (send-off (:merge-agent drum) (:merge-action drum) drum)
-                (log-insert name true drum))
+                (log-insert (:name drum) true drum))
               (do
-                (log-insert name false drum)))
+                (log-insert (:name drum) false drum)))
             (.unlock file-lock)
             (assoc old-bucket :buffer [] :overflow false))
           (do
